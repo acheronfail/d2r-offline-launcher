@@ -42,7 +42,7 @@ type terrorZoneSource struct {
 func terrorZonePath(game string) string { return filepath.Join(game, terrorZoneRelativePath) }
 
 func usesExtractedTerrorZones(m manifest) bool {
-	args := gameArgsFromOptions(m.OriginalLaunchOptions)
+	args := gameArgsFromOptions(m.LaunchOptions)
 	direct, txt := false, false
 	for _, arg := range args {
 		if strings.EqualFold(arg, "-direct") {
@@ -159,7 +159,7 @@ func generateTerrorZoneSchedule(original []byte, now time.Time, offsetSeconds in
 			entry[key] = value
 		}
 		for key, value := range map[string]any{
-			"name":                  fmt.Sprintf("d2r_camping_slot_%d", i),
+			"name":                  fmt.Sprintf("d2r_offline_slot_%d", i),
 			"start_time_utc":        fakeStart.Format(terrorTimeLayout),
 			"end_time_utc":          fakeStart.Add(source.period).Format(terrorTimeLayout),
 			"zone_duration_minutes": int(source.period / time.Minute),
@@ -209,7 +209,7 @@ func readTerrorZoneRecord(state string) (terrorZoneRecord, error) {
 }
 
 func atomicGameFile(path string, data []byte, mode os.FileMode) error {
-	out, err := os.CreateTemp(filepath.Dir(path), ".d2r-camping-tz-*")
+	out, err := os.CreateTemp(filepath.Dir(path), ".d2r-offline-tz-*")
 	if err != nil {
 		return err
 	}

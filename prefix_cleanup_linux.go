@@ -77,7 +77,7 @@ func preparePrefixForOfflineLaunch(prefix, proton string) error {
 		"steam.exe": true, "wineserver": true, "services.exe": true,
 		"winedevice.exe": true, "plugplay.exe": true, "svchost.exe": true,
 		"explorer.exe": true, "rpcss.exe": true, "tabtip.exe": true,
-		"xalia.exe": true, "conhost.exe": true, "D2R-Camping-Ins": true,
+		"xalia.exe": true, "conhost.exe": true, "D2R-Offline-Lau": true,
 	}
 	var staleLaunchers []int
 	serverPresent := false

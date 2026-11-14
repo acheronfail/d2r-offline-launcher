@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -48,8 +49,11 @@ func TestInstallAndUninstallLeaveGameAndCookieUntouched(t *testing.T) {
 	if e != nil || m.Version != 4 || m.Prefix != prefix || m.ShortcutAppID != "4292372109" {
 		t.Fatalf("Wrong installation: %+v, %v", m, e)
 	}
-	if current, e := findShortcut(game, installedBinaryPath(stateDir())); e != nil || !sameExecutable(current.Exe, installedBinaryPath(stateDir())) {
-		t.Fatalf("Install did not redirect D2R shortcut: %+v, %v", current, e)
+	if afterShortcut, e := os.ReadFile(shortcutsFile); e != nil || !bytes.Equal(afterShortcut, beforeShortcut) {
+		t.Fatal("Install changed the D2R Steam shortcut")
+	}
+	if _, e := os.Stat(installedBinaryPath(game)); e != nil {
+		t.Fatal("Install did not save the GUI launcher")
 	}
 	if _, e := os.Stat(filepath.Join(stateDir(), "license.so")); e != nil {
 		t.Fatal(e)
@@ -72,6 +76,15 @@ func TestInstallAndUninstallLeaveGameAndCookieUntouched(t *testing.T) {
 	if e != nil || m.Prefix != prefix {
 		t.Fatal("Refresh changed the Proton prefix")
 	}
+	retargeted := bytes.Replace(beforeShortcut,
+		[]byte(strconv.Quote(filepath.Join(game, "D2R.exe"))),
+		[]byte(strconv.Quote(installedBinaryPath(game))), 1)
+	if bytes.Equal(retargeted, beforeShortcut) {
+		t.Fatal("Fixture D2R shortcut was not found")
+	}
+	if e := os.WriteFile(shortcutsFile, retargeted, 0600); e != nil {
+		t.Fatal(e)
+	}
 	if e := uninstall(); e != nil {
 		t.Fatal(e)
 	}
@@ -83,11 +96,26 @@ func TestInstallAndUninstallLeaveGameAndCookieUntouched(t *testing.T) {
 	if e != nil || !bytes.Equal(got, []byte("D2R.exe")) {
 		t.Fatal("Original game changed")
 	}
-	if _, e := os.Stat(stateDir()); !os.IsNotExist(e) {
-		t.Fatal("Installation directory remained")
+	if _, e := readManifest(stateDir()); !os.IsNotExist(e) {
+		t.Fatal("Offline installation record remained")
 	}
-	if afterShortcut, e := os.ReadFile(shortcutsFile); e != nil || !bytes.Equal(afterShortcut, beforeShortcut) {
-		t.Fatal("Uninstall did not restore the original D2R shortcut")
+	if _, e := os.Stat(installedBinaryPath(game)); e != nil {
+		t.Fatal("Uninstall removed the GUI launcher")
+	}
+	if _, e := readSelection(stateDir()); e != nil {
+		t.Fatal("Uninstall removed the saved paths")
+	}
+	if afterShortcut, e := os.ReadFile(shortcutsFile); e != nil || !bytes.Equal(afterShortcut, retargeted) {
+		t.Fatal("Uninstall changed the D2R Steam shortcut")
+	}
+	if e := install(game); e != nil {
+		t.Fatalf("Reinstall after uninstall failed: %v", e)
+	}
+	if m, e := readManifest(stateDir()); e != nil || m.Prefix != prefix || m.ShortcutAppID != "4292372109" || m.LaunchOptions == "" {
+		t.Fatalf("Reinstall lost saved Steam settings: %+v, %v", m, e)
+	}
+	if e := uninstall(); e != nil {
+		t.Fatal(e)
 	}
 }
 

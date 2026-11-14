@@ -14,7 +14,7 @@ import (
 func TestShortcutAppIDUsesGameShortcutNotSharedPrefix(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("D2R_CAMPING_PREFIX", "")
+	t.Setenv("D2R_OFFLINE_PREFIX", "")
 	game := filepath.Join(home, "Games", "Diablo II Resurrected")
 	if err := os.MkdirAll(game, 0700); err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-module d2r-camping-installer
+module d2r-offline-launcher
 
 go 1.24
 

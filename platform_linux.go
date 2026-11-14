@@ -44,7 +44,7 @@ func steamRoots() []string {
 	return []string{filepath.Join(h, ".steam", "steam"), filepath.Join(h, ".local", "share", "Steam")}
 }
 func choosePrefix() string {
-	if p := os.Getenv("D2R_CAMPING_PREFIX"); p != "" {
+	if p := os.Getenv("D2R_OFFLINE_PREFIX"); p != "" {
 		return p
 	}
 	if game := autodetect(); game != "" {
@@ -147,14 +147,6 @@ func gpuEnvironment() []string {
 		"DXVK_FILTER_DEVICE_NAME=" + name}
 }
 
-func offlineClockStatus(m manifest) string {
-	_, anchor, err := offlineClockOffset(m.Prefix, time.Now())
-	if err != nil {
-		return "\n" + err.Error()
-	}
-	return "\nOffline game date: " + anchor.Format("Mon 2 Jan 2006, 15:04 MST")
-}
-
 func launch() error {
 	state := stateDir()
 	m, e := readManifest(state)
@@ -197,17 +189,17 @@ func launch() error {
 	if appid == "" {
 		appid = filepath.Base(m.Prefix)
 	}
-	if override := os.Getenv("D2R_CAMPING_STEAM_APP_ID"); override != "" {
+	if override := os.Getenv("D2R_OFFLINE_STEAM_APP_ID"); override != "" {
 		appid = override
 	}
 	args := []string{"--", "/usr/bin/env", "STEAM_COMPAT_DATA_PATH=" + m.Prefix,
 		"STEAM_COMPAT_CLIENT_INSTALL_PATH=" + root, "SteamAppId=" + appid,
 		"SteamGameId=" + appid, "LD_PRELOAD=" + preload,
-		"D2R_CAMPING_CLOCK_OFFSET_SECONDS=" + strconv.FormatInt(offset, 10),
+		"D2R_OFFLINE_CLOCK_OFFSET_SECONDS=" + strconv.FormatInt(offset, 10),
 		"D2R_ELF_PATCH_LOG=" + patchLog}
 	args = append(args, gpuEnvironment()...)
 	args = append(args, proton, "waitforexitandrun", filepath.Join(m.Game, "D2R.exe"))
-	args = append(args, gameArgsFromOptions(m.OriginalLaunchOptions)...)
+	args = append(args, gameArgsFromOptions(m.LaunchOptions)...)
 	cmd, e := offlineRuntimeCommand(runtime, args...)
 	if e != nil {
 		return e

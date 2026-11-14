@@ -118,7 +118,7 @@ static uintptr_t game_base(void) {
 
 static void *worker(void *unused) {
     (void)unused;
-    const char *value = getenv("D2R_CAMPING_CLOCK_OFFSET_SECONDS");
+    const char *value = getenv("D2R_OFFLINE_CLOCK_OFFSET_SECONDS");
     if (!value || !*value) return NULL;
     errno = 0;
     char *end = NULL;

@@ -15,11 +15,6 @@ import (
 // The game process inherits a private network namespace. The installer can
 // exit after launch; no process needs to wait for D2R to finish.
 func offlineRuntimeCommand(runtime string, args ...string) (*exec.Cmd, error) {
-	// The integration harness already supplies a network namespace and runs
-	// launch() from the Go test executable, whose main cannot handle this flag.
-	if os.Getenv("D2R_CAMPING_INTEGRATION") == "1" || os.Getenv("D2R_CAMPING_DETACHED_INTEGRATION") == "1" {
-		return exec.Command(runtime, args...), nil
-	}
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err

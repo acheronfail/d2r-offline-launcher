@@ -37,7 +37,7 @@ func TestTerrorZoneAlignmentRestoresOriginalFile(t *testing.T) {
 	if err := os.WriteFile(path, original, 0644); err != nil {
 		t.Fatal(err)
 	}
-	m := manifest{Game: game, Version: 4, OriginalLaunchOptions: "%command% -direct -txt"}
+	m := manifest{Game: game, Version: 4, LaunchOptions: "%command% -direct -txt"}
 	if err := prepareTerrorZones(state, m); err != nil {
 		t.Fatal(err)
 	}
@@ -103,9 +103,9 @@ func TestTerrorZoneAlignmentRestoresOriginalFile(t *testing.T) {
 }
 
 func TestRetailTerrorZoneRollVector(t *testing.T) {
-	game := os.Getenv("D2R_CAMPING_INSPECT_GAME")
+	game := os.Getenv("D2R_OFFLINE_INSPECT_GAME")
 	if game == "" {
-		t.Skip("set D2R_CAMPING_INSPECT_GAME to check the current retail JSON")
+		t.Skip("set D2R_OFFLINE_INSPECT_GAME to check the current retail JSON")
 	}
 	data, err := os.ReadFile(terrorZonePath(game))
 	if err != nil {
