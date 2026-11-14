@@ -199,6 +199,7 @@ func statusDetails() (string, string, string) {
 	return "Installed", "", anchor.Format("Mon 2 Jan 2006")
 }
 func newWindow(a fyne.App) fyne.Window {
+	a.Settings().SetTheme(theme.DarkTheme())
 	w := a.NewWindow("D2R Offline Launcher")
 	w.Resize(fyne.NewSize(700, 300))
 	game := widget.NewEntry()
@@ -328,7 +329,9 @@ func newWindow(a fyne.App) fyne.Window {
 	launchButton = widget.NewButton("Launch Offline", func() { run("Launching…", launchStep) })
 	launchButton.Importance = widget.HighImportance
 	uninstallButton = widget.NewButton("Uninstall", func() { run("Uninstalling…", uninstall) })
-	actionButtons = []*widget.Button{installButton, launchButton, uninstallButton}
+	exitButton := widget.NewButtonWithIcon("Exit", theme.CancelIcon(), w.Close)
+	exitButton.Importance = widget.DangerImportance
+	actionButtons = []*widget.Button{installButton, launchButton, uninstallButton, exitButton}
 	pathField := func(label string, entry *widget.Entry, button *widget.Button) fyne.CanvasObject {
 		return container.NewVBox(caption(label), container.NewBorder(nil, nil, nil, button, entry))
 	}
@@ -336,7 +339,7 @@ func newWindow(a fyne.App) fyne.Window {
 		container.NewBorder(nil, nil, nil, state, title), widget.NewSeparator(),
 		pathField("GAME FOLDER", game, browse),
 		pathField("PROTON PREFIX", prefix, browsePrefix),
-		container.NewGridWithColumns(2, launchButton, container.NewGridWithColumns(2, installButton, uninstallButton)),
+		container.NewGridWithColumns(2, launchButton, container.NewGridWithColumns(3, installButton, uninstallButton, exitButton)),
 	)
 	w.SetContent(container.NewPadded(container.NewBorder(form, nil, nil, nil, status)))
 	refreshStatus()
