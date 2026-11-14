@@ -347,9 +347,28 @@ func newWindow(a fyne.App) fyne.Window {
 		pathField("PROTON PREFIX", prefix, browsePrefix),
 		container.NewGridWithColumns(2, launchButton, container.NewGridWithColumns(3, installButton, uninstallButton, exitButton)),
 	)
-	w.SetContent(container.NewPadded(container.NewBorder(form, nil, nil, nil, status)))
+	focusRing := canvas.NewRectangle(color.Transparent)
+	focusRing.StrokeColor = color.NRGBA{R: 255, G: 205, B: 72, A: 255}
+	focusRing.StrokeWidth = 3
+	focusRing.CornerRadius = 8
+	focusRing.Hide()
+	ringLayer := container.NewWithoutLayout(focusRing)
+	w.SetContent(container.NewStack(
+		container.NewPadded(container.NewBorder(form, nil, nil, nil, status)),
+		ringLayer,
+	))
 	refreshStatus()
 	syncButtons()
+	startGamepad(w, a, []gamepadTarget{
+		{game, func() { browse.Tapped(nil) }},
+		{browse, nil},
+		{prefix, func() { browsePrefix.Tapped(nil) }},
+		{browsePrefix, nil},
+		{launchButton, nil},
+		{installButton, nil},
+		{uninstallButton, nil},
+		{exitButton, nil},
+	}, launchButton, installButton, focusRing, ringLayer)
 	return w
 }
 func main() {

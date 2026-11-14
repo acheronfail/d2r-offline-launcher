@@ -32,8 +32,6 @@ func TestGUIExitLeavesInstallationIntact(t *testing.T) {
 	a := test.NewApp()
 	defer a.Quit()
 	w := newWindow(a)
-	closed := false
-	w.SetOnClosed(func() { closed = true })
 	w.Show()
 	exit := findButton(w.Content(), "Exit")
 	if exit == nil {
@@ -41,8 +39,10 @@ func TestGUIExitLeavesInstallationIntact(t *testing.T) {
 	}
 	position := a.Driver().AbsolutePositionForObject(exit)
 	test.TapCanvas(w.Canvas(), fyne.NewPos(position.X+exit.Size().Width/2, position.Y+exit.Size().Height/2))
-	if !closed {
-		t.Fatal("Exit did not close the launcher window")
+	for _, open := range a.Driver().AllWindows() {
+		if open == w {
+			t.Fatal("Exit did not close the launcher window")
+		}
 	}
 	if _, err := readManifest(state); err != nil {
 		t.Fatalf("Exit changed the installation: %v", err)
