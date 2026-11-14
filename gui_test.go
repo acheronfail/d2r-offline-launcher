@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,41 @@ import (
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 )
+
+func TestGUIExitLeavesInstallationIntact(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	state := filepath.Join(home, "state")
+	t.Setenv("D2R_OFFLINE_STATE_DIR", state)
+	if err := os.MkdirAll(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	record, err := json.Marshal(manifest{Game: filepath.Join(home, "game"), Prefix: filepath.Join(home, "prefix"), Version: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "installation.json"), record, 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := test.NewApp()
+	defer a.Quit()
+	w := newWindow(a)
+	closed := false
+	w.SetOnClosed(func() { closed = true })
+	w.Show()
+	exit := findButton(w.Content(), "Exit")
+	if exit == nil {
+		t.Fatal("Exit button is missing")
+	}
+	position := a.Driver().AbsolutePositionForObject(exit)
+	test.TapCanvas(w.Canvas(), fyne.NewPos(position.X+exit.Size().Width/2, position.Y+exit.Size().Height/2))
+	if !closed {
+		t.Fatal("Exit did not close the launcher window")
+	}
+	if _, err := readManifest(state); err != nil {
+		t.Fatalf("Exit changed the installation: %v", err)
+	}
+}
 
 func findButton(object fyne.CanvasObject, label string) *widget.Button {
 	if button, ok := object.(*widget.Button); ok && button.Text == label {

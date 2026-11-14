@@ -198,10 +198,16 @@ func statusDetails() (string, string, string) {
 	}
 	return "Installed", "", anchor.Format("Mon 2 Jan 2006")
 }
+func inGamescope() bool {
+	return strings.Contains(strings.ToLower(os.Getenv("XDG_CURRENT_DESKTOP")), "gamescope")
+}
 func newWindow(a fyne.App) fyne.Window {
 	a.Settings().SetTheme(theme.DarkTheme())
 	w := a.NewWindow("D2R Offline Launcher")
 	w.Resize(fyne.NewSize(700, 300))
+	if inGamescope() {
+		w.SetFullScreen(true)
+	}
 	game := widget.NewEntry()
 	game.TextStyle = fyne.TextStyle{Monospace: true}
 	game.SetPlaceHolder("Choose the D2R folder")
@@ -380,6 +386,9 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+	if inGamescope() && os.Getenv("FYNE_SCALE") == "" {
+		os.Setenv("FYNE_SCALE", "0.6")
 	}
 	a := app.NewWithID("org.acheronfail.d2r-offline-launcher")
 	newWindow(a).ShowAndRun()
