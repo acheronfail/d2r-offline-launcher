@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// A changed file hash must not block Install when the executable is still a
-// valid 64-bit PE. The live shim makes the final structural decision.
+// PE preflight accepts a modified executable; the live shim checks its
+// structure at launch.
 func TestPEPreflightAcceptsUnrelatedFileChanges(t *testing.T) {
 	game := os.Getenv("D2R_OFFLINE_INSPECT_GAME")
 	if game == "" {

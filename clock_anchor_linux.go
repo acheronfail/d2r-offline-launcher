@@ -9,9 +9,8 @@ import (
 	"time"
 )
 
-// offlineClockOffset keeps the game near the start of the signed cookie's
-// window, with today's weekday and local wall-clock time. The cookie is read
-// for metadata only; its bytes and timestamps are never changed.
+// offlineClockOffset uses the signed cookie's timestamp to keep the game near
+// the start of its window, with today's weekday and local wall-clock time.
 func offlineClockOffset(prefix string, now time.Time) (int64, time.Time, error) {
 	info, err := os.Stat(cookiePath(prefix))
 	if errors.Is(err, os.ErrNotExist) {

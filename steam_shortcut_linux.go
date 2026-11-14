@@ -29,9 +29,8 @@ func shortcutField(segment []byte, name string) string {
 	return ""
 }
 
-// Steam can launch a non-Steam game in another shortcut's Proton prefix.
-// Find the ID attached to this D2R.exe instead of assuming the prefix's
-// directory name is its game ID.
+// A D2R shortcut can use another shortcut's Proton prefix. Read the app ID
+// attached to D2R.exe for its offline launch.
 func shortcutForGame(game string) steamShortcut {
 	target := filepath.Join(game, "D2R.exe")
 	if resolved, err := filepath.EvalSymlinks(target); err == nil {
@@ -85,7 +84,7 @@ func shortcutForGame(game string) steamShortcut {
 
 func shortcutAppID(game string) string { return shortcutForGame(game).AppID }
 
-// Split the argument portion of Steam Launch Options without invoking a shell.
+// Split the argument portion of Steam Launch Options.
 func splitLaunchWords(input string) ([]string, bool) {
 	var words []string
 	var current strings.Builder

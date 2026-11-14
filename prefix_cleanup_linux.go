@@ -102,9 +102,8 @@ func preparePrefixForOfflineLaunch(prefix, proton string) error {
 			serverPresent = true
 		}
 	}
-	// A previous detached Proton launcher can linger behind its Wine server
-	// after the game closes. Stop only our D2R launchers before ending that
-	// idle server, so they cannot start a queued second game during cleanup.
+	// A detached Proton launcher can linger behind its Wine server after the
+	// game closes. Stop our D2R launchers before ending that idle server.
 	for _, pid := range staleLaunchers {
 		comm, cmdline, match := prefixProcess(pid, wanted)
 		if !match || comm != "python3" || !bytes.Contains(cmdline, []byte("D2R.exe")) {

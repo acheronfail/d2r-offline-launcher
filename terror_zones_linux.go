@@ -347,7 +347,7 @@ func restoreTerrorZones(state string, m manifest) error {
 	}
 	current, err := os.ReadFile(record.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil // An update removed the extracted file; do not recreate it.
+		return nil
 	}
 	if err != nil {
 		return err
