@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -90,16 +89,22 @@ func choosePrefix() string {
 	return best
 }
 func protonPaths(prefix string) (string, string, string, error) {
+	configured := configuredProton(prefix)
 	wanted, _ := os.ReadFile(filepath.Join(prefix, "version"))
-	major := strings.SplitN(strings.TrimSpace(string(wanted)), "-", 2)[0]
+	major := ""
+	if match := prefixMajorPattern.FindSubmatch(wanted); len(match) == 2 {
+		major = string(match[1])
+	}
 	bestScore := -1
 	var bestRoot, bestProton, bestRuntime string
 	for _, root := range steamRoots() {
 		dir := filepath.Join(root, "steamapps", "common")
 		entries, _ := os.ReadDir(dir)
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() > entries[j].Name() })
 		for _, entry := range entries {
 			if !strings.HasPrefix(entry.Name(), "Proton") {
+				continue
+			}
+			if configured != "" && entry.Name() != configured {
 				continue
 			}
 			proton := filepath.Join(dir, entry.Name(), "proton")
@@ -109,14 +114,16 @@ func protonPaths(prefix string) (string, string, string, error) {
 			}
 			if _, e := os.Stat(runtime); e == nil {
 				score := 0
-				if strings.Contains(entry.Name(), "Experimental") {
-					score += 1
-				}
 				version, _ := os.ReadFile(filepath.Join(dir, entry.Name(), "version"))
-				if major != "" && strings.Contains(string(version), major) {
-					score += 10
+				if major != "" {
+					if match := protonMajorPattern.FindSubmatch(version); len(match) == 2 && string(match[1]) == major {
+						score += 10
+					}
 				}
-				if score > bestScore {
+				if !strings.Contains(entry.Name(), "Experimental") {
+					score++
+				}
+				if score > bestScore || score == bestScore && entry.Name() > filepath.Base(filepath.Dir(bestProton)) {
 					bestScore, bestRoot, bestProton, bestRuntime = score, root, proton, runtime
 				}
 			}
@@ -124,6 +131,9 @@ func protonPaths(prefix string) (string, string, string, error) {
 	}
 	if bestScore >= 0 {
 		return bestRoot, bestProton, bestRuntime, nil
+	}
+	if configured != "" {
+		return "", "", "", fmt.Errorf("Steam's configured %s is missing; install it in Steam", configured)
 	}
 	return "", "", "", errors.New("Proton and Steam Linux Runtime Sniper were not found")
 }
