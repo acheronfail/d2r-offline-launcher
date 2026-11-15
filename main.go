@@ -204,7 +204,7 @@ func inGamescope() bool {
 func newWindow(a fyne.App) fyne.Window {
 	a.Settings().SetTheme(theme.DarkTheme())
 	w := a.NewWindow("D2R Offline Launcher")
-	w.Resize(fyne.NewSize(700, 300))
+	w.Resize(fyne.NewSize(700, 460))
 	if inGamescope() {
 		w.SetFullScreen(true)
 	}
@@ -246,10 +246,57 @@ func newWindow(a fyne.App) fyne.Window {
 	dateRow := container.NewBorder(nil, nil, dateLabel, nil, dateValue)
 	note := widget.NewLabel("")
 	note.Wrapping = fyne.TextWrapWord
-	messageArea := container.NewVScroll(note)
+	metadataValue := func() *widget.Label {
+		value := widget.NewLabel("")
+		value.TextStyle = fyne.TextStyle{Monospace: true}
+		return value
+	}
+	cookieState, cookieModified, cookieAge := metadataValue(), metadataValue(), metadataValue()
+	gameVersion, gameModified := metadataValue(), metadataValue()
+	cookieState.TextStyle = fyne.TextStyle{Bold: true}
+	gameVersion.TextStyle = fyne.TextStyle{Bold: true, Monospace: true}
+	gameVersion.Importance = widget.HighImportance
+	metadataRow := func(label string, value *widget.Label) fyne.CanvasObject {
+		return container.NewBorder(nil, nil,
+			container.NewGridWrap(fyne.NewSize(125, 28), caption(label)), nil, value)
+	}
+	metadataSection := func(title string, rows ...fyne.CanvasObject) fyne.CanvasObject {
+		heading := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		heading.SizeName = theme.SizeNameSubHeadingText
+		background := canvas.NewRectangle(theme.Color(theme.ColorNameButton))
+		background.CornerRadius = 8
+		content := container.NewVBox(append([]fyne.CanvasObject{heading, widget.NewSeparator()}, rows...)...)
+		return container.NewStack(background, container.NewPadded(content))
+	}
+	metadata := container.NewGridWithColumns(2,
+		metadataSection("BATTLE.NET COOKIE",
+			metadataRow("STATUS", cookieState),
+			metadataRow("MODIFIED", cookieModified),
+			metadataRow("AGE", cookieAge)),
+		metadataSection("GAME BUILD",
+			metadataRow("VERSION", gameVersion),
+			metadataRow("EXE MODIFIED", gameModified)),
+	)
 	panel := canvas.NewRectangle(theme.Color(theme.ColorNameInputBackground))
 	panel.CornerRadius = 8
-	status := container.NewStack(panel, container.NewPadded(container.NewBorder(dateRow, nil, nil, nil, messageArea)))
+	statusContent := container.NewVBox(dateRow, note, metadata)
+	status := container.NewStack(panel, container.NewPadded(container.NewVScroll(statusContent)))
+	refreshMetadata := func() {
+		m := metadataDetails(strings.TrimSpace(game.Text), strings.TrimSpace(prefix.Text), time.Now())
+		cookieState.SetText(m.cookieState)
+		if m.cookieState == "File present" {
+			cookieState.Importance = widget.SuccessImportance
+		} else {
+			cookieState.Importance = widget.DangerImportance
+		}
+		cookieState.Refresh()
+		cookieModified.SetText(m.cookieModified)
+		cookieAge.SetText(m.cookieAge)
+		gameVersion.SetText(m.gameVersion)
+		gameModified.SetText(m.gameModified)
+	}
+	game.OnChanged = func(string) { refreshMetadata() }
+	prefix.OnChanged = func(string) { refreshMetadata() }
 	setStatus := func(label, message, date string) {
 		state.Importance = widget.LowImportance
 		switch label {
@@ -269,9 +316,9 @@ func newWindow(a fyne.App) fyne.Window {
 		}
 		note.SetText(message)
 		if message == "" {
-			messageArea.Hide()
+			note.Hide()
 		} else {
-			messageArea.Show()
+			note.Show()
 		}
 		status.Refresh()
 	}
@@ -284,7 +331,10 @@ func newWindow(a fyne.App) fyne.Window {
 			uninstallButton.Disable()
 		}
 	}
-	refreshStatus := func() { setStatus(statusDetails()) }
+	refreshStatus := func() {
+		setStatus(statusDetails())
+		refreshMetadata()
+	}
 	run := func(activity string, fn func() error) {
 		if !working.CompareAndSwap(false, true) {
 			return
