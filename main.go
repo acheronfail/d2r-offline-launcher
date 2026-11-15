@@ -24,7 +24,7 @@ import (
 //go:embed payload/license.so payload/LICENSE.fyne
 var payload embed.FS
 
-var verifyInstallBuild = verifyGameBuild
+var verifySelectedBuild = verifyGameBuild
 var launchStep = launch
 
 type manifest struct {
@@ -61,7 +61,11 @@ func autodetect() string {
 	return ""
 }
 func readManifest(state string) (manifest, error) {
-	return readManifestFile(filepath.Join(state, "installation.json"))
+	m, err := readManifestFile(filepath.Join(state, "settings.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return readManifestFile(filepath.Join(state, "installation.json"))
+	}
+	return m, err
 }
 func readSelection(state string) (manifest, error) {
 	return readManifestFile(filepath.Join(state, "selection.json"))
@@ -74,18 +78,16 @@ func readManifestFile(path string) (manifest, error) {
 	var m manifest
 	e = json.Unmarshal(b, &m)
 	if e != nil || m.Version != 4 || m.Game == "" {
-		return manifest{}, errors.New("Installation record is invalid")
+		return manifest{}, errors.New("Saved settings are invalid")
 	}
 	return m, nil
 }
-func install(source string) error {
-	return installWithPrefix(source, "")
-}
-func installWithPrefix(source, selectedPrefix string) error {
+
+func saveSettings(source, selectedPrefix string) error {
 	if e := validGame(source); e != nil {
 		return e
 	}
-	if e := verifyInstallBuild(source); e != nil {
+	if e := verifySelectedBuild(source); e != nil {
 		return e
 	}
 	source, e := filepath.Abs(source)
@@ -94,23 +96,24 @@ func installWithPrefix(source, selectedPrefix string) error {
 	}
 	state := stateDir()
 	if s, e := os.Lstat(state); e == nil && (!s.IsDir() || s.Mode()&os.ModeSymlink != 0) {
-		return errors.New("Installation path is unsafe")
+		return errors.New("Settings path is unsafe")
 	}
 	if e := os.MkdirAll(state, 0700); e != nil {
 		return e
 	}
 	m := manifest{Game: source, Version: 4}
 	if previous, e := readManifest(state); e == nil {
-		if previous.Game != source {
-			return errors.New("Uninstall the old game location first")
+		if previous.Game == source {
+			m = previous
 		}
-		m = previous
 	} else if !errors.Is(e, os.ErrNotExist) {
-		return fmt.Errorf("Existing installation needs the earlier installer for removal: %w", e)
+		return fmt.Errorf("Read saved settings: %w", e)
 	} else {
 		if saved, e := readSelection(state); e == nil && saved.Game == source {
 			m = saved
 		}
+	}
+	if m.Prefix == "" {
 		if override := os.Getenv("D2R_OFFLINE_PREFIX"); override != "" {
 			m.Prefix = override
 		}
@@ -136,67 +139,32 @@ func installWithPrefix(source, selectedPrefix string) error {
 	if m.ShortcutAppID == "" {
 		shortcut := shortcutForGame(source)
 		m.ShortcutAppID = shortcut.AppID
-		m.LaunchOptions = shortcut.LaunchOptions
-	}
-	licensePatch, e := payload.ReadFile("payload/license.so")
-	if e != nil {
-		return e
-	}
-	if e := os.WriteFile(filepath.Join(state, "license.so"), licensePatch, 0600); e != nil {
-		return e
-	}
-	license, e := payload.ReadFile("payload/LICENSE.fyne")
-	if e != nil {
-		return e
-	}
-	if e := os.WriteFile(filepath.Join(state, "LICENSE.fyne"), license, 0644); e != nil {
-		return e
-	}
-	if e := copyInstaller(source); e != nil {
-		return e
-	}
-	if e := prepareTerrorZones(state, m); e != nil {
-		return e
+		if m.LaunchOptions == "" {
+			m.LaunchOptions = shortcut.LaunchOptions
+		}
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
-	if e := os.WriteFile(filepath.Join(state, "selection.json"), b, 0600); e != nil {
+	if e := atomicGameFile(filepath.Join(state, "settings.json"), b, 0600); e != nil {
 		return e
 	}
-	if e := os.WriteFile(filepath.Join(state, "installation.json"), b, 0600); e != nil {
-		return e
-	}
-	return nil
-}
-func uninstall() error {
-	state := stateDir()
-	m, e := readManifest(state)
-	if e != nil {
-		return e
-	}
-	s, e := os.Lstat(state)
-	if e != nil || !s.IsDir() || s.Mode()&os.ModeSymlink != 0 {
-		return errors.New("Installation path is unsafe")
-	}
-	if e := restoreTerrorZones(state, m); e != nil {
-		return e
-	}
-	for _, name := range []string{"license.so", terrorZoneBackupName, terrorZoneRecordName, "patch.log", "last-launch.log", "installation.json"} {
+	for _, name := range []string{"installation.json", "selection.json"} {
 		if e := os.Remove(filepath.Join(state, name)); e != nil && !errors.Is(e, os.ErrNotExist) {
 			return e
 		}
 	}
 	return nil
 }
+
 func statusDetails() (string, string, string) {
 	m, e := readManifest(stateDir())
 	if e != nil {
-		return "Not installed", "Choose the game folder and Proton prefix, then Install.", ""
+		return "Ready", "Choose the game folder and Proton prefix, then Launch Offline.", ""
 	}
 	_, anchor, e := offlineClockOffset(m.Prefix, time.Now())
 	if e != nil {
-		return "Installed", e.Error(), ""
+		return "Ready", e.Error(), ""
 	}
-	return "Installed", "", anchor.Format("Mon 2 Jan 2006")
+	return "Ready", "", anchor.Format("Mon 2 Jan 2006")
 }
 func inGamescope() bool {
 	return strings.Contains(strings.ToLower(os.Getenv("XDG_CURRENT_DESKTOP")), "gamescope")
@@ -205,6 +173,14 @@ func newWindow(a fyne.App) fyne.Window {
 	a.Settings().SetTheme(theme.DarkTheme())
 	w := a.NewWindow("D2R Offline Launcher")
 	w.Resize(fyne.NewSize(700, 460))
+	w.SetMainMenu(fyne.NewMainMenu(fyne.NewMenu("Help", fyne.NewMenuItem("Licenses", func() {
+		license, _ := payload.ReadFile("payload/LICENSE.fyne")
+		label := widget.NewLabel(string(license))
+		label.Wrapping = fyne.TextWrapWord
+		d := dialog.NewCustom("Fyne license", "Close", container.NewVScroll(label), w)
+		d.Resize(fyne.NewSize(620, 400))
+		d.Show()
+	}))))
 	if inGamescope() {
 		w.SetFullScreen(true)
 	}
@@ -300,7 +276,7 @@ func newWindow(a fyne.App) fyne.Window {
 	setStatus := func(label, message, date string) {
 		state.Importance = widget.LowImportance
 		switch label {
-		case "Installed":
+		case "Ready":
 			state.Importance = widget.SuccessImportance
 		case "Working":
 			state.Importance = widget.HighImportance
@@ -324,13 +300,18 @@ func newWindow(a fyne.App) fyne.Window {
 	}
 	var working atomic.Bool
 	var actionButtons []*widget.Button
-	var launchButton, uninstallButton *widget.Button
-	syncButtons := func() {
-		if _, e := readManifest(stateDir()); e != nil {
-			launchButton.Disable()
-			uninstallButton.Disable()
+	var launchButton *widget.Button
+	hidden := false
+	requestClose := func() {
+		if working.Load() {
+			hidden = true
+			w.Hide()
+			return
 		}
+		w.SetCloseIntercept(nil)
+		w.Close()
 	}
+	w.SetCloseIntercept(requestClose)
 	refreshStatus := func() {
 		setStatus(statusDetails())
 		refreshMetadata()
@@ -342,6 +323,8 @@ func newWindow(a fyne.App) fyne.Window {
 		for _, button := range actionButtons {
 			button.Disable()
 		}
+		game.Disable()
+		prefix.Disable()
 		setStatus("Working", activity, "")
 		go func() {
 			e := fn()
@@ -355,7 +338,12 @@ func newWindow(a fyne.App) fyne.Window {
 				for _, button := range actionButtons {
 					button.Enable()
 				}
-				syncButtons()
+				game.Enable()
+				prefix.Enable()
+				if hidden {
+					hidden = false
+					w.Show()
+				}
 				working.Store(false)
 			})
 		}()
@@ -378,16 +366,18 @@ func newWindow(a fyne.App) fyne.Window {
 			}
 		}, w)
 	})
-	installButton := widget.NewButton("Install", func() {
+	launchButton = widget.NewButton("Launch Offline", func() {
 		p, q := strings.TrimSpace(game.Text), strings.TrimSpace(prefix.Text)
-		run("Installing…", func() error { return installWithPrefix(p, q) })
+		run("Launching…", func() error {
+			return runSession(p, q, func() {
+				fyne.Do(func() { setStatus("Working", "Game running", "") })
+			})
+		})
 	})
-	launchButton = widget.NewButton("Launch Offline", func() { run("Launching…", launchStep) })
 	launchButton.Importance = widget.HighImportance
-	uninstallButton = widget.NewButton("Uninstall", func() { run("Uninstalling…", uninstall) })
-	exitButton := widget.NewButtonWithIcon("Exit", theme.CancelIcon(), w.Close)
+	exitButton := widget.NewButtonWithIcon("Exit", theme.CancelIcon(), requestClose)
 	exitButton.Importance = widget.DangerImportance
-	actionButtons = []*widget.Button{installButton, launchButton, uninstallButton, exitButton}
+	actionButtons = []*widget.Button{launchButton, exitButton, browse, browsePrefix}
 	pathField := func(label string, entry *widget.Entry, button *widget.Button) fyne.CanvasObject {
 		return container.NewVBox(caption(label), container.NewBorder(nil, nil, nil, button, entry))
 	}
@@ -395,7 +385,7 @@ func newWindow(a fyne.App) fyne.Window {
 		container.NewBorder(nil, nil, nil, state, title), widget.NewSeparator(),
 		pathField("GAME FOLDER", game, browse),
 		pathField("PROTON PREFIX", prefix, browsePrefix),
-		container.NewGridWithColumns(2, launchButton, container.NewGridWithColumns(3, installButton, uninstallButton, exitButton)),
+		container.NewGridWithColumns(2, launchButton, exitButton),
 	)
 	focusRing := canvas.NewRectangle(color.Transparent)
 	focusRing.StrokeColor = color.NRGBA{R: 255, G: 205, B: 72, A: 255}
@@ -408,37 +398,39 @@ func newWindow(a fyne.App) fyne.Window {
 		ringLayer,
 	))
 	refreshStatus()
-	syncButtons()
+	if err := recoverOnStartup(); err != nil {
+		setStatus("Action needed", err.Error(), "")
+	}
 	startGamepad(w, a, []gamepadTarget{
 		{game, func() { browse.Tapped(nil) }},
 		{browse, nil},
 		{prefix, func() { browsePrefix.Tapped(nil) }},
 		{browsePrefix, nil},
 		{launchButton, nil},
-		{installButton, nil},
-		{uninstallButton, nil},
 		{exitButton, nil},
-	}, launchButton, installButton, focusRing, ringLayer)
+	}, launchButton, focusRing, ringLayer)
 	return w
 }
 func main() {
 	if len(os.Args) > 1 {
 		var err error
 		switch os.Args[1] {
-		case "--install":
-			game := autodetect()
+		case "--launch-offline":
+			game, prefix := "", ""
 			if len(os.Args) > 2 {
 				game = os.Args[2]
 			}
-			prefix := ""
 			if len(os.Args) > 3 {
 				prefix = os.Args[3]
 			}
-			err = installWithPrefix(game, prefix)
-		case "--launch-offline":
-			err = launch()
-		case "--uninstall":
-			err = uninstall()
+			if game == "" {
+				if m, e := readManifest(stateDir()); e == nil {
+					game, prefix = m.Game, m.Prefix
+				} else {
+					game = autodetect()
+				}
+			}
+			err = runSession(game, prefix, func() {})
 		case "--offline-child":
 			if len(os.Args) < 4 {
 				err = errors.New("Missing offline runtime command")

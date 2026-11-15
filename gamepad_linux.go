@@ -88,7 +88,6 @@ type gamepadNavigation struct {
 	window  fyne.Window
 	targets []gamepadTarget
 	launch  *widget.Button
-	install *widget.Button
 	ring    *canvas.Rectangle
 	layer   fyne.CanvasObject
 }
@@ -129,7 +128,7 @@ func (n *gamepadNavigation) focusDefault() {
 	}
 	button := n.launch
 	if button.Disabled() {
-		button = n.install
+		return
 	}
 	for index, target := range n.targets {
 		if target.object == button {
@@ -233,9 +232,9 @@ func waitForGamepad(done <-chan struct{}, duration time.Duration) bool {
 	}
 }
 
-func startGamepad(window fyne.Window, app fyne.App, targets []gamepadTarget, launch, install *widget.Button, ring *canvas.Rectangle, layer fyne.CanvasObject) {
+func startGamepad(window fyne.Window, app fyne.App, targets []gamepadTarget, launch *widget.Button, ring *canvas.Rectangle, layer fyne.CanvasObject) {
 	var active atomic.Bool
-	navigation := gamepadNavigation{window: window, targets: targets, launch: launch, install: install, ring: ring, layer: layer}
+	navigation := gamepadNavigation{window: window, targets: targets, launch: launch, ring: ring, layer: layer}
 	app.Lifecycle().SetOnEnteredForeground(func() { active.Store(true) })
 	app.Lifecycle().SetOnExitedForeground(func() {
 		active.Store(false)

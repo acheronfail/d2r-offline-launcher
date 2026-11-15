@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,7 +14,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func TestGUIExitLeavesInstallationIntact(t *testing.T) {
+func TestGUIExitLeavesSettingsIntact(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	state := filepath.Join(home, "state")
@@ -26,7 +26,7 @@ func TestGUIExitLeavesInstallationIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(state, "installation.json"), record, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(state, "settings.json"), record, 0600); err != nil {
 		t.Fatal(err)
 	}
 	a := test.NewApp()
@@ -45,7 +45,7 @@ func TestGUIExitLeavesInstallationIntact(t *testing.T) {
 		}
 	}
 	if _, err := readManifest(state); err != nil {
-		t.Fatalf("Exit changed the installation: %v", err)
+		t.Fatalf("Exit changed saved settings: %v", err)
 	}
 }
 
@@ -77,131 +77,117 @@ func findStatusPanel(object fyne.CanvasObject) *canvas.Rectangle {
 	return nil
 }
 
-func TestGUIInstallAndUninstallButtons(t *testing.T) {
+type interceptWindow struct {
+	fyne.Window
+	closeRequested func()
+}
+
+func (w *interceptWindow) SetCloseIntercept(fn func()) {
+	w.closeRequested = fn
+	w.Window.SetCloseIntercept(fn)
+}
+
+// The headless Fyne driver runs Do callbacks on the calling goroutine. Serialize
+// them here to model the native event queue, including assertions after cleanup.
+type serializedTestDriver struct {
+	fyne.Driver
+	mu sync.Mutex
+}
+
+func (d *serializedTestDriver) DoFromGoroutine(fn func(), _ bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	fn()
+}
+
+type interceptApp struct {
+	fyne.App
+	window *interceptWindow
+	driver *serializedTestDriver
+}
+
+func (a *interceptApp) Driver() fyne.Driver { return a.driver }
+
+func (a *interceptApp) NewWindow(title string) fyne.Window {
+	a.window = &interceptWindow{Window: a.App.NewWindow(title)}
+	return a.window
+}
+
+func TestGUISessionLifecycle(t *testing.T) {
 	allowFixtureBuild(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	game := filepath.Join(home, "Games", "BattleNet", "Diablo II Resurrected")
-	if err := os.MkdirAll(game, 0700); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"D2R.exe", "D2R_loader.dll"} {
-		if err := os.WriteFile(filepath.Join(game, name), []byte(name), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	prefix := filepath.Join(home, "compatdata", "12345")
-	if err := os.MkdirAll(filepath.Join(prefix, "pfx"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	setupSteamShortcut(t, home, game, prefix)
-	state := filepath.Join(home, "installed")
+	game, prefix := fixtureSession(t)
 	t.Setenv("D2R_OFFLINE_PREFIX", prefix)
-	t.Setenv("D2R_OFFLINE_STATE_DIR", state)
-	a := test.NewApp()
+	// Start with saved paths, not an installed marker.
+	if err := saveSettings(game, prefix); err != nil {
+		t.Fatal(err)
+	}
+	started, stop, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	launchStep = func(ready func()) error { ready(); close(started); <-stop; return nil }
+	defer func() { launchStep = launch }()
+	base := test.NewApp()
+	a := &interceptApp{App: base, driver: &serializedTestDriver{Driver: base.Driver()}}
+	fyne.SetCurrentApp(a)
 	defer a.Quit()
 	w := newWindow(a)
 	w.Show()
-	defer w.Close()
+	defer func() { w.SetCloseIntercept(nil); w.Close() }()
+	if findButton(w.Content(), "Install") != nil || findButton(w.Content(), "Uninstall") != nil {
+		t.Fatal("Install controls remain")
+	}
 	panel := findStatusPanel(w.Content())
-	if panel == nil {
-		t.Fatal("GUI status panel is missing")
+	if panel == nil || panel.Size().Height < 40 {
+		t.Fatal("Missing or clipped status panel")
 	}
-	panelPosition := a.Driver().AbsolutePositionForObject(panel)
-	panelSize := panel.Size()
-	if panelSize.Height < 40 {
-		t.Fatalf("Status panel is too short to display messages: %v", panelSize)
-	}
-	checkLayout := func(stage string) {
-		if got := a.Driver().AbsolutePositionForObject(panel); got != panelPosition || panel.Size() != panelSize {
-			t.Fatalf("Status panel moved during %s: %v %v, want %v %v", stage, got, panel.Size(), panelPosition, panelSize)
+	panelPosition, panelSize := a.Driver().AbsolutePositionForObject(panel), panel.Size()
+	checkLayout := func() {
+		if a.Driver().AbsolutePositionForObject(panel) != panelPosition || panel.Size() != panelSize {
+			t.Error("Status panel moved during session")
 		}
 		if panelPosition.Y+panelSize.Height > w.Canvas().Size().Height {
-			t.Fatalf("Status panel clips below the window during %s", stage)
+			t.Error("Status panel clips below window")
 		}
 	}
-	installButton := findButton(w.Content(), "Install")
 	launchButton := findButton(w.Content(), "Launch Offline")
-	uninstallButton := findButton(w.Content(), "Uninstall")
-	if installButton == nil || launchButton == nil || uninstallButton == nil {
-		t.Fatal("GUI is missing Install, Launch Offline, or Uninstall")
+	exit := findButton(w.Content(), "Exit")
+	if launchButton == nil || exit == nil {
+		t.Fatal("Missing session controls")
 	}
-	started := make(chan struct{})
-	continueInstall := make(chan struct{})
-	verifyInstallBuild = func(string) error {
-		close(started)
-		<-continueInstall
-		return nil
-	}
-	test.Tap(installButton)
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("GUI Install did not start")
-	}
-	checkLayout("Install progress")
-	close(continueInstall)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(filepath.Join(state, "installation.json")); err == nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	manifest, err := readManifest(state)
-	if err != nil || manifest.Prefix != prefix || manifest.Game != game {
-		t.Fatalf("GUI Install did not save the selected paths: %+v, %v", manifest, err)
-	}
-	installed, err := os.ReadFile(filepath.Join(state, "license.so"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := payload.ReadFile("payload/license.so")
-	if err != nil || !bytes.Equal(installed, want) {
-		t.Fatal("GUI Install did not extract the embedded license library")
-	}
-	for installButton.Disabled() && time.Now().Before(deadline.Add(5*time.Second)) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	checkLayout("installed status")
-	verifyInstallBuild = func(string) error { return nil }
-	called := make(chan struct{}, 1)
-	launchStep = func() error { called <- struct{}{}; return nil }
-	defer func() { launchStep = launch }()
 	test.Tap(launchButton)
 	select {
-	case <-called:
-	case <-time.After(2 * time.Second):
-		t.Fatal("GUI Launch Offline button did not start the launch action")
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Launch did not start")
 	}
-	for launchButton.Disabled() && time.Now().Before(deadline.Add(5*time.Second)) {
-		time.Sleep(10 * time.Millisecond)
+	checkLayout()
+	if !launchButton.Disabled() {
+		t.Fatal("Launch enabled during game")
 	}
-	test.Tap(uninstallButton)
-	for time.Now().Before(deadline.Add(5 * time.Second)) {
-		if _, err := os.Stat(filepath.Join(state, "installation.json")); os.IsNotExist(err) {
-			break
+	a.window.closeRequested() // Simulate the native window manager close event.
+	if w.Canvas() == nil {
+		t.Fatal("Window was destroyed")
+	}
+	close(stop)
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			enabled := false
+			fyne.DoAndWait(func() { enabled = !launchButton.Disabled() })
+			if enabled {
+				close(finished)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
-		time.Sleep(20 * time.Millisecond)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(6 * time.Second):
+		t.Fatal("Controls did not recover after game exit")
 	}
-	if _, err := readManifest(state); !os.IsNotExist(err) {
-		t.Fatal("GUI Uninstall did not remove the offline installation")
-	}
-	for installButton.Disabled() && time.Now().Before(deadline.Add(5*time.Second)) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	checkLayout("uninstalled status")
-	test.Tap(installButton)
-	for time.Now().Before(deadline.Add(5 * time.Second)) {
-		if _, err := os.Stat(filepath.Join(state, "installation.json")); err == nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if _, err := readManifest(state); err != nil {
-		t.Fatalf("GUI reinstall after uninstall failed: %v", err)
-	}
-	if data, err := os.ReadFile(filepath.Join(game, "D2R.exe")); err != nil || !bytes.Equal(data, []byte("D2R.exe")) {
-		t.Fatal("GUI actions changed the original game")
+	checkLayout()
+	if _, err := readManifest(stateDir()); err != nil {
+		t.Fatal(err)
 	}
 }

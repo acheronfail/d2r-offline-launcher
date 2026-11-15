@@ -226,7 +226,10 @@ func atomicGameFile(path string, data []byte, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(out.Name(), path)
+	if err := os.Rename(out.Name(), path); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
 }
 
 func prepareTerrorZones(state string, m manifest) error {
@@ -301,7 +304,7 @@ func alignTerrorZones(state string, m manifest, now time.Time, offsetSeconds int
 	}
 	currentSHA := terrorSHA(current)
 	if currentSHA != record.OriginalSHA && currentSHA != record.GeneratedSHA && currentSHA != record.PreviousSHA {
-		return errors.New("Terror Zone JSON changed outside this app; preserve it and reinstall after resolving the change")
+		return errors.New("Terror Zone JSON changed outside this app; its original backup has been preserved")
 	}
 	generated, end, err := generateTerrorZoneSchedule(backup, now, offsetSeconds)
 	if err != nil {
@@ -339,21 +342,21 @@ func restoreTerrorZones(state string, m manifest) error {
 		return errors.New("Close D2R in this Proton prefix before restoring Terror Zone data")
 	}
 	if record.Path != terrorZonePath(m.Game) {
-		return errors.New("Terror Zone restoration path differs from the installed game")
+		return errors.New("Terror Zone restoration path differs from the selected game")
 	}
 	backup, err := os.ReadFile(filepath.Join(state, terrorZoneBackupName))
 	if err != nil || terrorSHA(backup) != record.OriginalSHA {
 		return errors.New("Terror Zone backup is missing or damaged")
 	}
 	current, err := os.ReadFile(record.Path)
-	if errors.Is(err, os.ErrNotExist) {
+	if err != nil {
+		return fmt.Errorf("Read game data for recovery: %w", err)
+	}
+	if terrorSHA(current) == record.OriginalSHA {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
 	if terrorSHA(current) != record.GeneratedSHA && terrorSHA(current) != record.PreviousSHA {
-		return nil // Battle.net or another editor changed it; preserve their newer file.
+		return errors.New("Terror Zone data changed outside the launcher; the newer file and original backup have been preserved")
 	}
 	info, err := os.Stat(record.Path)
 	if err != nil {

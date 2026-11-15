@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -157,7 +158,7 @@ func gpuEnvironment() []string {
 		"DXVK_FILTER_DEVICE_NAME=" + name}
 }
 
-func launch() error {
+func launch(started func()) (result error) {
 	state := stateDir()
 	m, e := readManifest(state)
 	if e != nil {
@@ -182,7 +183,7 @@ func launch() error {
 	}
 	licensePatch := filepath.Join(state, "license.so")
 	if _, e := os.Stat(licensePatch); e != nil {
-		return errors.New("License library is missing; tap Install")
+		return errors.New("Offline support library is missing; try Launch Offline again")
 	}
 	patchLog := filepath.Join(state, "patch.log")
 	if e := os.WriteFile(patchLog, nil, 0600); e != nil {
@@ -227,9 +228,27 @@ func launch() error {
 	if e != nil {
 		return e
 	}
-	if e := cmd.Process.Release(); e != nil {
-		return e
-	}
+	runtimeDone := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(runtimeDone) }()
+	defer func() {
+		if result == nil {
+			return
+		}
+		// Stop this launch attempt before recovery. A timeout must not leave
+		// a delayed runtime free to start D2R after its data has been restored.
+		select {
+		case <-runtimeDone:
+			return
+		default:
+		}
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		select {
+		case <-runtimeDone:
+		case <-time.After(5 * time.Second):
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			<-runtimeDone
+		}
+	}()
 	confirmation := "clock shift active; seconds=" + strconv.FormatInt(offset, 10)
 	deadline := time.Now().Add(75 * time.Second)
 	for time.Now().Before(deadline) {
@@ -244,22 +263,22 @@ func launch() error {
 					if len(fields) == 0 || !strings.HasPrefix(fields[0], "pid=") {
 						return errors.New("Offline clock shim did not report the game process ID")
 					}
-					pid := strings.TrimPrefix(fields[0], "pid=")
-					for i := 0; i < 40; i++ {
-						status, err := os.ReadFile(filepath.Join("/proc", pid, "status"))
-						if err != nil || strings.Contains(string(status), "State:\tZ") {
-							return errors.New("D2R closed shortly after the offline clock shift was applied; check last-launch.log")
-						}
-						time.Sleep(250 * time.Millisecond)
+					pid, err := strconv.Atoi(strings.TrimPrefix(fields[0], "pid="))
+					if err != nil || pid <= 0 {
+						return errors.New("Invalid D2R process ID")
 					}
-					return nil
+					return waitForGame(pid, started)
 				}
 			}
 			if strings.Contains(message, "invalid offline clock offset") || strings.Contains(message, "unsupported D2R PE image") || strings.Contains(message, "offline network setup failed") {
 				return fmt.Errorf("Offline clock shift was not applied: %s", strings.TrimSpace(message))
 			}
 		}
-		time.Sleep(250 * time.Millisecond)
+		select {
+		case <-runtimeDone:
+			return errors.New("D2R exited before confirming startup; check last-launch.log")
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 	return errors.New("D2R did not confirm its process-only clock shift within 75 seconds; check last-launch.log and use Battle.net normally if this build is unsupported")
 }

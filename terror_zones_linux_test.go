@@ -75,7 +75,7 @@ func TestTerrorZoneAlignmentRestoresOriginalFile(t *testing.T) {
 	}
 	restored, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(restored, original) {
-		t.Fatal("Uninstall did not restore the exact original Terror Zone JSON")
+		t.Fatal("Cleanup did not restore the exact original Terror Zone JSON")
 	}
 	if err := alignTerrorZones(state, m, now, -21*86400); err != nil {
 		t.Fatal(err)

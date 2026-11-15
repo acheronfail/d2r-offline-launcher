@@ -12,8 +12,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The game process inherits a private network namespace. The installer can
-// exit after launch; no process needs to wait for D2R to finish.
+// The game process inherits a private network namespace. The launcher tracks
+// the game separately so it can restore session data after exit.
 func offlineRuntimeCommand(runtime string, args ...string) (*exec.Cmd, error) {
 	self, err := os.Executable()
 	if err != nil {
